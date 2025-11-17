@@ -12,8 +12,12 @@ $knownBenign = @(
     "excel.exe",
     "powerpnt.exe",
     "chrome.exe",
-    "firefox.exe"
+    "firefox.exe",
+    "Spotify.exe"
 )
+
+$spotifyHigh = 70000
+$spotifyLow  = 45000
 
 $thresholdBytes = 2MB
 
@@ -28,26 +32,23 @@ function Get-NetworkEvents {
     $netData = @()
 
     if ($sysEvents) {
-        Write-Host "[+] Sysmon network events found.`n"
 
         foreach ($ev in $sysEvents) {
             $xml = [xml]$ev.ToXml()
 
             $netData += [pscustomobject]@{
-                TimeCreated   = $ev.TimeCreated
-                Image         = $xml.Event.EventData.Data[0].'#text'
-                DestinationIp = $xml.Event.EventData.Data[3].'#text'
+                TimeCreated     = $ev.TimeCreated
+                Image           = $xml.Event.EventData.Data[0].'#text'
+                DestinationIp   = $xml.Event.EventData.Data[3].'#text'
                 DestinationPort = $xml.Event.EventData.Data[4].'#text'
-                Protocol      = $xml.Event.EventData.Data[5].'#text'
-                BytesOut      = $xml.Event.EventData.Data[10].'#text'
-                BytesIn       = $xml.Event.EventData.Data[11].'#text'
+                Protocol        = $xml.Event.EventData.Data[5].'#text'
+                BytesOut        = [int64]$xml.Event.EventData.Data[10].'#text'
+                BytesIn         = [int64]$xml.Event.EventData.Data[11].'#text'
             }
         }
 
         return $netData
     }
-
-    Write-Host "[!] Sysmon not found. Using Get-NetTCPConnection.`n"
 
     Get-NetTCPConnection | ForEach-Object {
         try {
@@ -58,13 +59,13 @@ function Get-NetworkEvents {
         }
 
         [pscustomobject]@{
-            TimeCreated   = (Get-Date)
-            Image         = $exe
-            DestinationIp = $_.RemoteAddress
+            TimeCreated     = (Get-Date)
+            Image           = $exe
+            DestinationIp   = $_.RemoteAddress
             DestinationPort = $_.RemotePort
-            Protocol      = "TCP"
-            BytesOut      = 0
-            BytesIn       = 0
+            Protocol        = "TCP"
+            BytesOut        = 0
+            BytesIn         = 0
         }
     }
 }
@@ -79,11 +80,16 @@ $results = foreach ($e in $events) {
     if (-not $e.Image) { continue }
 
     $flags = @()
+    $procName = Split-Path $e.Image -Leaf
 
-    $sig = Get-AuthenticodeSignature $e.Image -ErrorAction SilentlyContinue
-    if ($sig.Status -ne "Valid") {
-        $flags += "Unsigned Executable"
-    }
+    try {
+        if (Test-Path $e.Image) {
+            $sig = Get-AuthenticodeSignature $e.Image -ErrorAction Stop
+            if ($sig.Status -ne "Valid") {
+                $flags += "Unsigned Executable"
+            }
+        }
+    } catch {}
 
     foreach ($f in $suspiciousFolders) {
         if ($e.Image -like "*$f*") {
@@ -102,7 +108,17 @@ $results = foreach ($e in $events) {
         $flags += "Excessive Network Traffic"
     }
 
-    $procName = Split-Path $e.Image -Leaf
+    if ($procName -ieq "Spotify.exe") {
+
+        if ($e.BytesIn -gt $spotifyHigh -or $e.BytesOut -gt $spotifyHigh) {
+            $flags += "Spotify Traffic Above Normal Range"
+        }
+
+        if ($e.BytesIn -lt $spotifyLow -or $e.BytesOut -lt $spotifyLow) {
+            $flags += "Spotify Traffic Below Normal Range"
+        }
+    }
+
     if ($knownBenign -contains $procName) {
         if ($e.BytesOut -gt $thresholdBytes -or $e.BytesIn -gt $thresholdBytes) {
             $flags += "Benign App Using Excessive Traffic"
