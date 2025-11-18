@@ -6,11 +6,11 @@ Write-Host "Last Boot Time:" $boot "`n"
 $knownBenign = @(
     "mspaint.exe","notepad.exe","calc.exe","explorer.exe",
     "winword.exe","excel.exe","powerpnt.exe","chrome.exe",
-    "firefox.exe","vscode.exe","node.exe"
+    "firefox.exe","Spotify.exe"
 )
 
+$alwaysLog = @("calc.exe","mspaint.exe","vscode.exe","node.exe")
 $suspiciousFolders = @("AppData","Temp","Downloads","Public","Recycle.Bin")
-
 $csvFolder = "$env:USERPROFILE\Desktop\SRUM_Network.csv"
 
 if (-not (Test-Path $csvFolder)) {
@@ -19,7 +19,6 @@ if (-not (Test-Path $csvFolder)) {
 }
 
 $csvFiles = Get-ChildItem -Path $csvFolder -Filter *.csv
-
 if ($csvFiles.Count -eq 0) {
     Write-Host "No CSV files found in folder 'SRUM_Network.csv'." -ForegroundColor Red
     return
@@ -36,18 +35,16 @@ foreach ($row in $rawEvents) {
         $ts = [datetime]::Parse($row.TimeCreated)
         if ($ts -lt $boot) { continue }
 
-        $image = if ($row.ExecutablePath) { $row.ExecutablePath } else { $null }
         $bytesIn = if ($row.BytesIn) { [int64]$row.BytesIn } else { 0 }
         $bytesOut = if ($row.BytesOut) { [int64]$row.BytesOut } else { 0 }
+        $image = if ($row.ExecutablePath) { $row.ExecutablePath } else { $null }
 
-        if ($image -and $image.ToLower().EndsWith(".exe")) {
-            $events += [pscustomobject]@{
-                TimeCreated = $ts
-                Image       = $image
-                BytesOut    = $bytesOut
-                BytesIn     = $bytesIn
-                Destination = "SRUM NetworkUsage Entry"
-            }
+        $events += [pscustomobject]@{
+            TimeCreated = $ts
+            Image       = $image
+            BytesOut    = $bytesOut
+            BytesIn     = $bytesIn
+            Destination = "SRUM NetworkUsage Entry"
         }
     } catch {}
 }
@@ -59,7 +56,7 @@ $results = foreach ($e in $events) {
     $procName = if ($e.Image) { Split-Path $e.Image -Leaf } else { "Unknown" }
 
     if (-not $e.Image) { $flags += "No Process Path / Unknown Executable" }
-    elseif ($procName -ne "svchost.exe") {
+    else {
         try {
             if (Test-Path $e.Image) {
                 $sig = Get-AuthenticodeSignature $e.Image -ErrorAction Stop
@@ -79,20 +76,20 @@ $results = foreach ($e in $events) {
         }
     } catch {}
 
-    [pscustomobject]@{
-        Time        = $e.TimeCreated
-        Process     = if ($e.Image) { $e.Image } else { "Unknown" }
-        Destination = $e.Destination
-        BytesOut    = $e.BytesOut
-        BytesIn     = $e.BytesIn
-        Flags       = $flags -join ", "
+    if ($flags.Count -gt 0 -or $alwaysLog -contains $procName) {
+        [pscustomobject]@{
+            Time        = $e.TimeCreated
+            Process     = if ($e.Image) { $e.Image } else { "Unknown" }
+            Destination = $e.Destination
+            BytesOut    = $e.BytesOut
+            BytesIn     = $e.BytesIn
+            Flags       = $flags -join ", "
+        }
     }
 }
 
-$results | Export-Csv "$env:USERPROFILE\Desktop\Suspicious_Network_Activity_CSV.csv" -NoTypeInformation
-$events | Export-Csv "$env:USERPROFILE\Desktop\All_Network_Activity_CSV.csv" -NoTypeInformation
-
 Write-Host "`n=== Suspicious Findings (CSV) ===`n"
 $results | Format-Table -AutoSize
-Write-Host "`nReports saved to Desktop as 'Suspicious_Network_Activity_CSV.csv' and 'All_Network_Activity_CSV.csv'"
+$results | Export-Csv "$env:USERPROFILE\Desktop\Suspicious_Network_Activity_CSV.csv" -NoTypeInformation
+Write-Host "`nReport saved to Desktop as 'Suspicious_Network_Activity_CSV.csv'"
 Write-Host "Done.`n"
