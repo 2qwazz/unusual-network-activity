@@ -1,7 +1,4 @@
-Write-Host "`n=== DFIR: Suspicious Network Activity Since Last Boot (CSV) ===`n"
-
-$boot = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
-Write-Host "Last Boot Time:" $boot "`n"
+Write-Host "`n=== DFIR: Suspicious Network Activity (CSV) ===`n"
 
 $csvFolder = "$env:USERPROFILE\Desktop\SRUM_Network.csv"
 
@@ -24,9 +21,7 @@ $rawEvents = Import-Csv $csvPath
 $events = @()
 foreach ($row in $rawEvents) {
     try {
-        $ts = [datetime]::Parse($row.TimeCreated)
-        if ($ts -lt $boot) { continue }
-
+        $ts = if ($row.TimeCreated) { [datetime]::Parse($row.TimeCreated) } else { $null }
         $bytesIn = if ($row.BytesIn) { [int64]$row.BytesIn } else { 0 }
         $bytesOut = if ($row.BytesOut) { [int64]$row.BytesOut } else { 0 }
         $image = if ($row.ExecutablePath) { $row.ExecutablePath } else { $null }
@@ -41,7 +36,7 @@ foreach ($row in $rawEvents) {
     } catch {}
 }
 
-Write-Host "[+] Loaded" $events.Count "NetworkUsage records since boot.`n"
+Write-Host "[+] Loaded" $events.Count "NetworkUsage records.`n"
 
 $results = foreach ($e in $events) {
     [pscustomobject]@{
@@ -54,7 +49,7 @@ $results = foreach ($e in $events) {
     }
 }
 
-Write-Host "`n=== Network Usage Events (Since Last Boot) ===`n"
+Write-Host "`n=== All Network Usage Events ===`n"
 $results | Format-Table -AutoSize
 $results | Export-Csv "$env:USERPROFILE\Desktop\Suspicious_Network_Activity_CSV.csv" -NoTypeInformation
 Write-Host "`nReport saved to Desktop as 'Suspicious_Network_Activity_CSV.csv'"
