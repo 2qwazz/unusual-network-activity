@@ -9,7 +9,6 @@ $knownBenign = @(
     "firefox.exe","vscode.exe","node.exe"
 )
 
-$alwaysLog = @("calc.exe","mspaint.exe","vscode.exe","node.exe")
 $suspiciousFolders = @("AppData","Temp","Downloads","Public","Recycle.Bin")
 
 $csvFolder = "$env:USERPROFILE\Desktop\SRUM_Network.csv"
@@ -38,21 +37,17 @@ foreach ($row in $rawEvents) {
         if ($ts -lt $boot) { continue }
 
         $image = if ($row.ExecutablePath) { $row.ExecutablePath } else { $null }
-        if (-not $image) { $image = $null }
-
-        if ($image -and ([System.IO.Path]::GetExtension($image).ToLower() -ne ".exe")) { continue }
-        $procName = if ($image) { Split-Path $image -Leaf } else { "Unknown" }
-        if ($procName -ieq "svchost.exe") { continue }
-
         $bytesIn = if ($row.BytesIn) { [int64]$row.BytesIn } else { 0 }
         $bytesOut = if ($row.BytesOut) { [int64]$row.BytesOut } else { 0 }
 
-        $events += [pscustomobject]@{
-            TimeCreated = $ts
-            Image       = $image
-            BytesOut    = $bytesOut
-            BytesIn     = $bytesIn
-            Destination = "SRUM NetworkUsage Entry"
+        if ($image -and $image.ToLower().EndsWith(".exe")) {
+            $events += [pscustomobject]@{
+                TimeCreated = $ts
+                Image       = $image
+                BytesOut    = $bytesOut
+                BytesIn     = $bytesIn
+                Destination = "SRUM NetworkUsage Entry"
+            }
         }
     } catch {}
 }
@@ -60,13 +55,11 @@ foreach ($row in $rawEvents) {
 Write-Host "[+] Loaded" $events.Count "NetworkUsage records since boot.`n"
 
 $results = foreach ($e in $events) {
-    if ($e.TimeCreated -lt $boot) { continue }
-
     $flags = @()
     $procName = if ($e.Image) { Split-Path $e.Image -Leaf } else { "Unknown" }
 
     if (-not $e.Image) { $flags += "No Process Path / Unknown Executable" }
-    else {
+    elseif ($procName -ne "svchost.exe") {
         try {
             if (Test-Path $e.Image) {
                 $sig = Get-AuthenticodeSignature $e.Image -ErrorAction Stop
@@ -86,22 +79,20 @@ $results = foreach ($e in $events) {
         }
     } catch {}
 
-    if ($alwaysLog -contains $procName) { $flags += "Always Logged Process" }
-
-    if ($flags.Count -gt 0) {
-        [pscustomobject]@{
-            Time        = $e.TimeCreated
-            Process     = if ($e.Image) { $e.Image } else { "Unknown" }
-            Destination = $e.Destination
-            BytesOut    = $e.BytesOut
-            BytesIn     = $e.BytesIn
-            Flags       = $flags -join ", "
-        }
+    [pscustomobject]@{
+        Time        = $e.TimeCreated
+        Process     = if ($e.Image) { $e.Image } else { "Unknown" }
+        Destination = $e.Destination
+        BytesOut    = $e.BytesOut
+        BytesIn     = $e.BytesIn
+        Flags       = $flags -join ", "
     }
 }
 
+$results | Export-Csv "$env:USERPROFILE\Desktop\Suspicious_Network_Activity_CSV.csv" -NoTypeInformation
+$events | Export-Csv "$env:USERPROFILE\Desktop\All_Network_Activity_CSV.csv" -NoTypeInformation
+
 Write-Host "`n=== Suspicious Findings (CSV) ===`n"
 $results | Format-Table -AutoSize
-$results | Export-Csv "$env:USERPROFILE\Desktop\Suspicious_Network_Activity_CSV.csv" -NoTypeInformation
-Write-Host "`nReport saved to Desktop as 'Suspicious_Network_Activity_CSV.csv'"
+Write-Host "`nReports saved to Desktop as 'Suspicious_Network_Activity_CSV.csv' and 'All_Network_Activity_CSV.csv'"
 Write-Host "Done.`n"
