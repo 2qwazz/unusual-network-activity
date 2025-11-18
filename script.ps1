@@ -3,14 +3,15 @@ Write-Host "`n=== DFIR: Suspicious Network Activity Since Last Boot (CSV) ===`n"
 $boot = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
 Write-Host "Last Boot Time:" $boot "`n"
 
+$knownBenign = @(
+    "mspaint.exe","notepad.exe","calc.exe","explorer.exe",
+    "winword.exe","excel.exe","powerpnt.exe","chrome.exe",
+    "firefox.exe","Spotify.exe"
+)
+
 $alwaysLog = @("calc.exe","mspaint.exe","vscode.exe","node.exe")
 $suspiciousFolders = @("AppData","Temp","Downloads","Public","Recycle.Bin")
-$ignoreProcesses = @("svchost.exe")
 $csvFolder = "$env:USERPROFILE\Desktop\SRUM_Network.csv"
-
-$chromeThreshold = 50MB
-$spotifyHigh = 70MB
-$spotifyLow = 45MB
 
 if (-not (Test-Path $csvFolder)) {
     Write-Host "Folder 'SRUM_Network.csv' not found on Desktop." -ForegroundColor Red
@@ -31,12 +32,12 @@ $rawEvents = Import-Csv $csvPath
 $events = @()
 foreach ($row in $rawEvents) {
     try {
-        $ts = [datetime]::Parse($row.'Timestamp')
+        $ts = [datetime]::Parse($row."Timestamp")
         if ($ts -lt $boot) { continue }
 
-        $bytesIn = if ($row.'Bytes Received') { [int64]$row.'Bytes Received' } else { 0 }
-        $bytesOut = if ($row.'Bytes Sent') { [int64]$row.'Bytes Sent' } else { 0 }
-        $image = if ($row.'Exe Info') { $row.'Exe Info' } else { $null }
+        $bytesIn = if ($row."Bytes Received") { [int64]$row."Bytes Received" } else { 0 }
+        $bytesOut = if ($row."Bytes Sent") { [int64]$row."Bytes Sent" } else { 0 }
+        $image = if ($row."Exe Info") { $row."Exe Info" } else { $null }
 
         $events += [pscustomobject]@{
             TimeCreated = $ts
@@ -54,7 +55,7 @@ $results = foreach ($e in $events) {
     $flags = @()
     $procName = if ($e.Image) { Split-Path $e.Image -Leaf } else { "Unknown" }
 
-    if ($ignoreProcesses -contains $procName) { continue }
+    if ($procName -ieq "svchost.exe") { continue }
 
     if (-not $e.Image) { $flags += "No Process Path / Unknown Executable" }
     else {
@@ -77,15 +78,12 @@ $results = foreach ($e in $events) {
         }
     } catch {}
 
-    if ($procName -ieq "Chrome.exe") {
-        if ($e.BytesOut -gt $chromeThreshold -or $e.BytesIn -gt $chromeThreshold) {
-            $flags += "Chrome Traffic Above Normal"
-        }
+    if ($procName -ieq "Spotify.exe") {
+        # keeping this optional, removed traffic thresholds
     }
 
-    if ($procName -ieq "Spotify.exe") {
-        if ($e.BytesOut -gt $spotifyHigh -or $e.BytesIn -gt $spotifyHigh) { $flags += "Spotify Traffic Above Normal" }
-        if ($e.BytesOut -lt $spotifyLow -or $e.BytesIn -lt $spotifyLow)   { $flags += "Spotify Traffic Below Normal" }
+    if ($knownBenign -contains $procName) {
+        # keeping optional benign app flags, no traffic thresholds
     }
 
     if ($flags.Count -gt 0 -or $alwaysLog -contains $procName) {
