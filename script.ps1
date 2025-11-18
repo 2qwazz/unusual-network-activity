@@ -1,19 +1,12 @@
 Write-Host "`n=== DFIR: Suspicious Network Activity (CSV) ===`n"
 
-$csvFolder = "$env:USERPROFILE\Desktop\SRUM_Network.csv"
+$csvPath = "$env:USERPROFILE\Desktop\SRUM_Network.csv"
 
-if (-not (Test-Path $csvFolder)) {
-    Write-Host "Folder 'SRUM_Network.csv' not found on Desktop." -ForegroundColor Red
+if (-not (Test-Path $csvPath)) {
+    Write-Host "File 'SRUM_Network.csv' not found on Desktop." -ForegroundColor Red
     return
 }
 
-$csvFiles = Get-ChildItem -Path $csvFolder -Filter *.csv
-if ($csvFiles.Count -eq 0) {
-    Write-Host "No CSV files found in folder 'SRUM_Network.csv'." -ForegroundColor Red
-    return
-}
-
-$csvPath = $csvFiles[0].FullName
 Write-Host "[+] Using CSV file:" $csvPath "`n"
 
 $rawEvents = Import-Csv $csvPath
