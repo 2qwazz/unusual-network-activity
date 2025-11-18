@@ -5,12 +5,13 @@ Write-Host "Last Boot Time:" $boot "`n"
 
 $knownBenign = @(
     "mspaint.exe","notepad.exe","calc.exe","explorer.exe",
-    "winword.exe","excel.exe","powerpnt.exe","chrome.exe","firefox.exe",
-    "Spotify.exe"
+    "winword.exe","excel.exe","powerpnt.exe","chrome.exe",
+    "firefox.exe","vscode.exe","node.exe"
 )
 
 $alwaysLog = @("calc.exe","mspaint.exe","vscode.exe","node.exe")
 $suspiciousFolders = @("AppData","Temp","Downloads","Public","Recycle.Bin")
+
 $csvFolder = "$env:USERPROFILE\Desktop\SRUM_Network.csv"
 
 if (-not (Test-Path $csvFolder)) {
@@ -36,9 +37,15 @@ foreach ($row in $rawEvents) {
         $ts = [datetime]::Parse($row.TimeCreated)
         if ($ts -lt $boot) { continue }
 
+        $image = if ($row.ExecutablePath) { $row.ExecutablePath } else { $null }
+        if (-not $image) { $image = $null }
+
+        if ($image -and ([System.IO.Path]::GetExtension($image).ToLower() -ne ".exe")) { continue }
+        $procName = if ($image) { Split-Path $image -Leaf } else { "Unknown" }
+        if ($procName -ieq "svchost.exe") { continue }
+
         $bytesIn = if ($row.BytesIn) { [int64]$row.BytesIn } else { 0 }
         $bytesOut = if ($row.BytesOut) { [int64]$row.BytesOut } else { 0 }
-        $image = if ($row.ExecutablePath) { $row.ExecutablePath } else { $null }
 
         $events += [pscustomobject]@{
             TimeCreated = $ts
@@ -53,10 +60,10 @@ foreach ($row in $rawEvents) {
 Write-Host "[+] Loaded" $events.Count "NetworkUsage records since boot.`n"
 
 $results = foreach ($e in $events) {
+    if ($e.TimeCreated -lt $boot) { continue }
+
     $flags = @()
     $procName = if ($e.Image) { Split-Path $e.Image -Leaf } else { "Unknown" }
-
-    if ($procName -ieq "svchost.exe") { continue }
 
     if (-not $e.Image) { $flags += "No Process Path / Unknown Executable" }
     else {
@@ -79,7 +86,9 @@ $results = foreach ($e in $events) {
         }
     } catch {}
 
-    if ($flags.Count -gt 0 -or ($alwaysLog -contains $procName)) {
+    if ($alwaysLog -contains $procName) { $flags += "Always Logged Process" }
+
+    if ($flags.Count -gt 0) {
         [pscustomobject]@{
             Time        = $e.TimeCreated
             Process     = if ($e.Image) { $e.Image } else { "Unknown" }
