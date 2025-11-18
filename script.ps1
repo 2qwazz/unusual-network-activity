@@ -3,14 +3,7 @@ Write-Host "`n=== DFIR: Suspicious Network Activity Since Last Boot (CSV) ===`n"
 $boot = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
 Write-Host "Last Boot Time:" $boot "`n"
 
-$knownBenign = @(
-    "mspaint.exe","notepad.exe","calc.exe","explorer.exe",
-    "winword.exe","excel.exe","powerpnt.exe","chrome.exe",
-    "firefox.exe","Spotify.exe"
-)
-
 $alwaysLog = @("calc.exe","mspaint.exe","vscode.exe","node.exe")
-$suspiciousFolders = @("AppData","Temp","Downloads","Public","Recycle.Bin")
 $csvFolder = "$env:USERPROFILE\Desktop\SRUM_Network.csv"
 
 if (-not (Test-Path $csvFolder)) {
@@ -35,9 +28,16 @@ foreach ($row in $rawEvents) {
         $ts = [datetime]::Parse($row.Timestamp)
         if ($ts -lt $boot) { continue }
 
-        $bytesIn = if ($row.'Bytes Received') { [int64]$row.'Bytes Received' } else { 0 }
-        $bytesOut = if ($row.'Bytes Sent') { [int64]$row.'Bytes Sent' } else { 0 }
-        $image = if ($row.'Exe Info') { $row.'Exe Info' } else { $null }
+        $bytesIn = 0
+        $bytesOut = 0
+        if ($row.'Bytes Received') {
+            $bytesIn = [int64]($row.'Bytes Received' -replace ',','')
+        }
+        if ($row.'Bytes Sent') {
+            $bytesOut = [int64]($row.'Bytes Sent' -replace ',','')
+        }
+
+        $image = if ($row.'Exe Info') { $row.'Exe Info' } else { "Unknown" }
 
         $events += [pscustomobject]@{
             TimeCreated = $ts
@@ -52,23 +52,17 @@ foreach ($row in $rawEvents) {
 Write-Host "[+] Loaded" $events.Count "NetworkUsage records since boot.`n"
 
 $results = foreach ($e in $events) {
-    $flags = @()
-    $procName = if ($e.Image) { Split-Path $e.Image -Leaf } else { "Unknown" }
+    $procName = $e.Image
+    if ($procName -eq "svchost.exe") { continue }
 
-    if (-not $e.Image) { $flags += "No Process Info" }
-
-    foreach ($f in $suspiciousFolders) {
-        if ($e.Image -and ($e.Image -like "*$f*")) { $flags += "Suspicious Directory ($f)" }
-    }
-
-    if ($flags.Count -gt 0 -or $alwaysLog -contains $procName) {
+    if ($procName -or $alwaysLog -contains $procName) {
         [pscustomobject]@{
             Time        = $e.TimeCreated
-            Process     = if ($e.Image) { $e.Image } else { "Unknown" }
+            Process     = $e.Image
             Destination = $e.Destination
             BytesOut    = $e.BytesOut
             BytesIn     = $e.BytesIn
-            Flags       = $flags -join ", "
+            Flags       = ""
         }
     }
 }
