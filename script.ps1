@@ -32,12 +32,12 @@ $rawEvents = Import-Csv $csvPath
 $events = @()
 foreach ($row in $rawEvents) {
     try {
-        $ts = [datetime]::Parse($row."Timestamp")
+        $ts = [datetime]::Parse($row.Timestamp)
         if ($ts -lt $boot) { continue }
 
-        $bytesIn = if ($row."Bytes Received") { [int64]$row."Bytes Received" } else { 0 }
-        $bytesOut = if ($row."Bytes Sent") { [int64]$row."Bytes Sent" } else { 0 }
-        $image = if ($row."Exe Info") { $row."Exe Info" } else { $null }
+        $bytesIn = if ($row.'Bytes Received') { [int64]$row.'Bytes Received' } else { 0 }
+        $bytesOut = if ($row.'Bytes Sent') { [int64]$row.'Bytes Sent' } else { 0 }
+        $image = if ($row.'Exe Info') { $row.'Exe Info' } else { $null }
 
         $events += [pscustomobject]@{
             TimeCreated = $ts
@@ -55,35 +55,10 @@ $results = foreach ($e in $events) {
     $flags = @()
     $procName = if ($e.Image) { Split-Path $e.Image -Leaf } else { "Unknown" }
 
-    if ($procName -ieq "svchost.exe") { continue }
-
-    if (-not $e.Image) { $flags += "No Process Path / Unknown Executable" }
-    else {
-        try {
-            if (Test-Path $e.Image) {
-                $sig = Get-AuthenticodeSignature $e.Image -ErrorAction Stop
-                if ($sig.Status -ne "Valid") { $flags += "Unsigned Executable" }
-            }
-        } catch {}
-    }
+    if (-not $e.Image) { $flags += "No Process Info" }
 
     foreach ($f in $suspiciousFolders) {
         if ($e.Image -and ($e.Image -like "*$f*")) { $flags += "Suspicious Directory ($f)" }
-    }
-
-    try {
-        if ($e.Image -and (Test-Path $e.Image)) {
-            $file = Get-Item $e.Image -ErrorAction Stop
-            if ($file.CreationTime -gt $boot) { $flags += "New File Since Boot" }
-        }
-    } catch {}
-
-    if ($procName -ieq "Spotify.exe") {
-        # keeping this optional, removed traffic thresholds
-    }
-
-    if ($knownBenign -contains $procName) {
-        # keeping optional benign app flags, no traffic thresholds
     }
 
     if ($flags.Count -gt 0 -or $alwaysLog -contains $procName) {
