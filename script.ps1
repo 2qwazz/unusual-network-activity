@@ -31,13 +31,13 @@ foreach ($row in $rawEvents) {
         $bytesIn = 0
         $bytesOut = 0
         if ($row.'Bytes Received') {
-            $bytesIn = [int64]($row.'Bytes Received' -replace ',','')
+            $bytesIn = [int64]($row.'Bytes Received' -replace '[^0-9]','')
         }
         if ($row.'Bytes Sent') {
-            $bytesOut = [int64]($row.'Bytes Sent' -replace ',','')
+            $bytesOut = [int64]($row.'Bytes Sent' -replace '[^0-9]','')
         }
 
-        $image = if ($row.'Exe Info') { $row.'Exe Info' } else { "Unknown" }
+        $image = if ($row.'Exe Info') { $row.'Exe Info' } else { "" }
 
         $events += [pscustomobject]@{
             TimeCreated = $ts
@@ -58,7 +58,7 @@ $results = foreach ($e in $events) {
     if ($procName -or $alwaysLog -contains $procName) {
         [pscustomobject]@{
             Time        = $e.TimeCreated
-            Process     = $e.Image
+            Process     = if ($procName) { $procName } else { "Unknown" }
             Destination = $e.Destination
             BytesOut    = $e.BytesOut
             BytesIn     = $e.BytesIn
