@@ -30,18 +30,14 @@ foreach ($row in $rawEvents) {
 
         $bytesIn = 0
         $bytesOut = 0
-        if ($row.'Bytes Received') {
-            $bytesIn = [int64]($row.'Bytes Received' -replace '[^0-9]','')
-        }
-        if ($row.'Bytes Sent') {
-            $bytesOut = [int64]($row.'Bytes Sent' -replace '[^0-9]','')
-        }
+        if ($row.'Bytes Received') { $bytesIn = [int64]($row.'Bytes Received' -replace '[^0-9]','') }
+        if ($row.'Bytes Sent') { $bytesOut = [int64]($row.'Bytes Sent' -replace '[^0-9]','') }
 
-        $image = if ($row.'Exe Info') { $row.'Exe Info' } else { "" }
+        $procName = if ($row.'Exe Info') { $row.'Exe Info' } else { "Unknown" }
 
         $events += [pscustomobject]@{
             TimeCreated = $ts
-            Image       = $image
+            Process     = $procName
             BytesOut    = $bytesOut
             BytesIn     = $bytesIn
             Destination = "SRUM NetworkUsage Entry"
@@ -52,13 +48,12 @@ foreach ($row in $rawEvents) {
 Write-Host "[+] Loaded" $events.Count "NetworkUsage records since boot.`n"
 
 $results = foreach ($e in $events) {
-    $procName = $e.Image
-    if ($procName -eq "svchost.exe") { continue }
+    if ($e.Process -eq "svchost.exe") { continue }
 
-    if ($procName -or $alwaysLog -contains $procName) {
+    if ($e.Process -or $alwaysLog -contains $e.Process) {
         [pscustomobject]@{
             Time        = $e.TimeCreated
-            Process     = if ($procName) { $procName } else { "Unknown" }
+            Process     = $e.Process
             Destination = $e.Destination
             BytesOut    = $e.BytesOut
             BytesIn     = $e.BytesIn
