@@ -5,15 +5,12 @@ Write-Host "Last Boot Time:" $boot "`n"
 
 $knownBenign = @(
     "mspaint.exe","notepad.exe","calc.exe","explorer.exe",
-    "winword.exe","excel.exe","powerpnt.exe","chrome.exe",
-    "firefox.exe","Spotify.exe"
+    "winword.exe","excel.exe","powerpnt.exe","chrome.exe","firefox.exe",
+    "Spotify.exe"
 )
 
-$spotifyHigh = 70000
-$spotifyLow  = 45000
-$thresholdBytes = 2MB
+$alwaysLog = @("calc.exe","mspaint.exe","vscode.exe","node.exe")
 $suspiciousFolders = @("AppData","Temp","Downloads","Public","Recycle.Bin")
-
 $csvFolder = "$env:USERPROFILE\Desktop\SRUM_Network.csv"
 
 if (-not (Test-Path $csvFolder)) {
@@ -59,6 +56,8 @@ $results = foreach ($e in $events) {
     $flags = @()
     $procName = if ($e.Image) { Split-Path $e.Image -Leaf } else { "Unknown" }
 
+    if ($procName -ieq "svchost.exe") { continue }
+
     if (-not $e.Image) { $flags += "No Process Path / Unknown Executable" }
     else {
         try {
@@ -80,18 +79,7 @@ $results = foreach ($e in $events) {
         }
     } catch {}
 
-    if ($e.BytesOut -gt $thresholdBytes -or $e.BytesIn -gt $thresholdBytes) { $flags += "Excessive Network Traffic" }
-
-    if ($procName -ieq "Spotify.exe") {
-        if ($e.BytesIn -gt $spotifyHigh -or $e.BytesOut -gt $spotifyHigh) { $flags += "Spotify Traffic Above Normal Range" }
-        if ($e.BytesIn -lt $spotifyLow -or $e.BytesOut -lt $spotifyLow) { $flags += "Spotify Traffic Below Normal Range" }
-    }
-
-    if ($knownBenign -contains $procName) {
-        if ($e.BytesOut -gt $thresholdBytes -or $e.BytesIn -gt $thresholdBytes) { $flags += "Benign App Using Excessive Traffic" }
-    }
-
-    if ($flags.Count -gt 0) {
+    if ($flags.Count -gt 0 -or ($alwaysLog -contains $procName)) {
         [pscustomobject]@{
             Time        = $e.TimeCreated
             Process     = if ($e.Image) { $e.Image } else { "Unknown" }
