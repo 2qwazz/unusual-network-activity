@@ -11,16 +11,16 @@ $knownBenign = @(
 
 $alwaysLog = @("calc.exe","mspaint.exe","vscode.exe","node.exe")
 $suspiciousFolders = @("AppData","Temp","Downloads","Public","Recycle.Bin")
-$csvFolder = "$env:USERPROFILE\Desktop\SRUM_Network.csv"
+$csvFolder = "$env:USERPROFILE\Desktop\SRUM_Network" 
 
 if (-not (Test-Path $csvFolder)) {
-    Write-Host "Folder 'SRUM_Network.csv' not found on Desktop." -ForegroundColor Red
+    Write-Host "Folder 'SRUM_Network' not found on Desktop." -ForegroundColor Red
     return
 }
 
 $csvFiles = Get-ChildItem -Path $csvFolder -Filter *.csv
 if ($csvFiles.Count -eq 0) {
-    Write-Host "No CSV files found in folder 'SRUM_Network.csv'." -ForegroundColor Red
+    Write-Host "No CSV files found in folder 'SRUM_Network'." -ForegroundColor Red
     return
 }
 
@@ -29,15 +29,31 @@ Write-Host "[+] Using CSV file:" $csvPath "`n"
 
 $rawEvents = Import-Csv $csvPath
 
+if ($rawEvents.Count -eq 0) {
+    Write-Host "CSV is empty." -ForegroundColor Yellow
+    return
+}
+
+# Dynamically detect column names
+$timeCol = ($rawEvents | Get-Member -MemberType NoteProperty | Where-Object {$_.Name -match "time"}).Name
+$bytesInCol = ($rawEvents | Get-Member -MemberType NoteProperty | Where-Object {$_.Name -match "recv|bytesin"}).Name
+$bytesOutCol = ($rawEvents | Get-Member -MemberType NoteProperty | Where-Object {$_.Name -match "sent|bytesout"}).Name
+$imageCol = ($rawEvents | Get-Member -MemberType NoteProperty | Where-Object {$_.Name -match "exe|path|app"}).Name
+
 $events = @()
 foreach ($row in $rawEvents) {
     try {
-        $ts = [datetime]::Parse($row.TimeCreated)
+        $ts = [datetime]::Parse($row.$timeCol)
         if ($ts -lt $boot) { continue }
 
-        $bytesIn = if ($row.BytesIn) { [int64]$row.BytesIn } else { 0 }
-        $bytesOut = if ($row.BytesOut) { [int64]$row.BytesOut } else { 0 }
-        $image = if ($row.ExecutablePath) { $row.ExecutablePath } else { $null }
+        $image = if ($row.$imageCol) { $row.$imageCol } else { $null }
+        if (-not $image) { continue } # skip rows with no executable path
+
+        $procName = Split-Path $image -Leaf
+        if ($procName -ieq "svchost.exe") { continue } # skip svchost
+
+        $bytesIn = if ($row.$bytesInCol) { [int64]$row.$bytesInCol } else { 0 }
+        $bytesOut = if ($row.$bytesOutCol) { [int64]$row.$bytesOutCol } else { 0 }
 
         $events += [pscustomobject]@{
             TimeCreated = $ts
@@ -53,27 +69,23 @@ Write-Host "[+] Loaded" $events.Count "NetworkUsage records since boot.`n"
 
 $results = foreach ($e in $events) {
     $flags = @()
-    $procName = if ($e.Image) { Split-Path $e.Image -Leaf } else { "Unknown" }
+    $procName = Split-Path $e.Image -Leaf
 
-    if (-not $e.Image) { $flags += "No Process Path / Unknown Executable" }
+    if (-not (Test-Path $e.Image)) { $flags += "No Process Path / Unknown Executable" }
     else {
         try {
-            if (Test-Path $e.Image) {
-                $sig = Get-AuthenticodeSignature $e.Image -ErrorAction Stop
-                if ($sig.Status -ne "Valid") { $flags += "Unsigned Executable" }
-            }
+            $sig = Get-AuthenticodeSignature $e.Image -ErrorAction Stop
+            if ($sig.Status -ne "Valid") { $flags += "Unsigned Executable" }
         } catch {}
     }
 
     foreach ($f in $suspiciousFolders) {
-        if ($e.Image -and ($e.Image -like "*$f*")) { $flags += "Suspicious Directory ($f)" }
+        if ($e.Image -like "*$f*") { $flags += "Suspicious Directory ($f)" }
     }
 
     try {
-        if ($e.Image -and (Test-Path $e.Image)) {
-            $file = Get-Item $e.Image -ErrorAction Stop
-            if ($file.CreationTime -gt $boot) { $flags += "New File Since Boot" }
-        }
+        $file = Get-Item $e.Image -ErrorAction Stop
+        if ($file.CreationTime -gt $boot) { $flags += "New File Since Boot" }
     } catch {}
 
     if ($flags.Count -gt 0 -or $alwaysLog -contains $procName) {
