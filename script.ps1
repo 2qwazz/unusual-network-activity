@@ -4,6 +4,9 @@ $boot = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
 Write-Host "Last Boot Time:" $boot "`n"
 
 $alwaysLog = @("calc.exe","mspaint.exe","vscode.exe","node.exe")
+$skipProcesses = @("svchost.exe")
+$suspiciousFolders = @("AppData","Temp","Downloads","Public","Recycle.Bin")
+
 $csvFolder = "$env:USERPROFILE\Desktop\SRUM_Network.csv"
 
 if (-not (Test-Path $csvFolder)) {
@@ -28,14 +31,18 @@ foreach ($row in $rawEvents) {
         $ts = [datetime]::Parse($row.Timestamp)
         if ($ts -lt $boot) { continue }
 
-        $image = $row.'Exe Info'
-        if (-not $image -and -not ($alwaysLog -contains $image)) { continue }
+        $bytesIn = if ($row.'Bytes Received') { [int64]$row.'Bytes Received' } else { 0 }
+        $bytesOut = if ($row.'Bytes Sent') { [int64]$row.'Bytes Sent' } else { 0 }
+        $image = if ($row.'Exe Info') { $row.'Exe Info' } else { $null }
+
+        if (-not $image) { continue }
+        if ($skipProcesses -contains $image) { continue }
 
         $events += [pscustomobject]@{
             TimeCreated = $ts
             Image       = $image
-            BytesOut    = [int64]$row.'Bytes Sent'
-            BytesIn     = [int64]$row.'Bytes Received'
+            BytesOut    = $bytesOut
+            BytesIn     = $bytesIn
             Destination = "SRUM NetworkUsage Entry"
         }
     } catch {}
@@ -44,16 +51,22 @@ foreach ($row in $rawEvents) {
 Write-Host "[+] Loaded" $events.Count "NetworkUsage records since boot.`n"
 
 $results = foreach ($e in $events) {
-    $procName = if ($e.Image) { $e.Image } else { "Unknown" }
-    if ($procName -ieq "svchost.exe") { continue }
+    $flags = @()
+    $procName = $e.Image
 
-    [pscustomobject]@{
-        Time        = $e.TimeCreated
-        Process     = $procName
-        Destination = $e.Destination
-        BytesOut    = $e.BytesOut
-        BytesIn     = $e.BytesIn
-        Flags       = if ($alwaysLog -contains $procName) { "Always Logged Process" } else { "" }
+    foreach ($f in $suspiciousFolders) {
+        if ($e.Image -and ($e.Image -like "*$f*")) { $flags += "Suspicious Directory ($f)" }
+    }
+
+    if ($flags.Count -gt 0 -or $alwaysLog -contains $procName) {
+        [pscustomobject]@{
+            Time        = $e.TimeCreated
+            Process     = $e.Image
+            Destination = $e.Destination
+            BytesOut    = $e.BytesOut
+            BytesIn     = $e.BytesIn
+            Flags       = $flags -join ", "
+        }
     }
 }
 
