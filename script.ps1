@@ -11,7 +11,6 @@ if (-not (Test-Path $csvFolder)) {
 }
 
 $csvFiles = Get-ChildItem -Path $csvFolder -Filter *.csv
-
 if ($csvFiles.Count -eq 0) {
     Write-Host "No CSV files found in folder 'SRUM_Network.csv'." -ForegroundColor Red
     return
@@ -28,11 +27,15 @@ foreach ($row in $rawEvents) {
         $ts = [datetime]::Parse($row.TimeCreated)
         if ($ts -lt $boot) { continue }
 
+        $bytesIn = if ($row.BytesIn) { [int64]$row.BytesIn } else { 0 }
+        $bytesOut = if ($row.BytesOut) { [int64]$row.BytesOut } else { 0 }
+        $image = if ($row.ExecutablePath) { $row.ExecutablePath } else { $null }
+
         $events += [pscustomobject]@{
             TimeCreated = $ts
-            Image       = if ($row.ExecutablePath) { $row.ExecutablePath } else { $null }
-            BytesOut    = if ($row.BytesOut) { [int64]$row.BytesOut } else { 0 }
-            BytesIn     = if ($row.BytesIn) { [int64]$row.BytesIn } else { 0 }
+            Image       = $image
+            BytesOut    = $bytesOut
+            BytesIn     = $bytesIn
             Destination = "SRUM NetworkUsage Entry"
         }
     } catch {}
@@ -40,8 +43,19 @@ foreach ($row in $rawEvents) {
 
 Write-Host "[+] Loaded" $events.Count "NetworkUsage records since boot.`n"
 
-Write-Host "`n=== Network Usage Events ===`n"
-$events | Format-Table -AutoSize
-$events | Export-Csv "$env:USERPROFILE\Desktop\Suspicious_Network_Activity_CSV.csv" -NoTypeInformation
+$results = foreach ($e in $events) {
+    [pscustomobject]@{
+        Time        = $e.TimeCreated
+        Process     = if ($e.Image) { $e.Image } else { "Unknown" }
+        Destination = $e.Destination
+        BytesOut    = $e.BytesOut
+        BytesIn     = $e.BytesIn
+        Flags       = ""
+    }
+}
+
+Write-Host "`n=== Network Usage Events (Since Last Boot) ===`n"
+$results | Format-Table -AutoSize
+$results | Export-Csv "$env:USERPROFILE\Desktop\Suspicious_Network_Activity_CSV.csv" -NoTypeInformation
 Write-Host "`nReport saved to Desktop as 'Suspicious_Network_Activity_CSV.csv'"
 Write-Host "Done.`n"
