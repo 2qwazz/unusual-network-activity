@@ -14,11 +14,22 @@ $spotifyLow  = 45000
 $thresholdBytes = 2MB
 $suspiciousFolders = @("AppData","Temp","Downloads","Public","Recycle.Bin")
 
-$csvPath = "$env:USERPROFILE\Desktop\SRUM_Network.csv"
-if (-not (Test-Path $csvPath)) {
-    Write-Host "SRUM CSV not found on Desktop. Generate it with SrumECmd first." -ForegroundColor Red
+$csvFolder = "$env:USERPROFILE\Desktop\SRUM_Network.csv"
+
+if (-not (Test-Path $csvFolder)) {
+    Write-Host "Folder 'SRUM_Network.csv' not found on Desktop." -ForegroundColor Red
     return
 }
+
+$csvFiles = Get-ChildItem -Path $csvFolder -Filter *.csv
+
+if ($csvFiles.Count -eq 0) {
+    Write-Host "No CSV files found in folder 'SRUM_Network.csv'." -ForegroundColor Red
+    return
+}
+
+$csvPath = $csvFiles[0].FullName
+Write-Host "[+] Using CSV file:" $csvPath "`n"
 
 $rawEvents = Import-Csv $csvPath
 
@@ -37,12 +48,12 @@ foreach ($row in $rawEvents) {
             Image       = $image
             BytesOut    = $bytesOut
             BytesIn     = $bytesIn
-            Destination = "SRUM CSV Entry"
+            Destination = "SRUM NetworkUsage Entry"
         }
     } catch {}
 }
 
-Write-Host "[+] Loaded" $events.Count "network usage records since boot.`n"
+Write-Host "[+] Loaded" $events.Count "NetworkUsage records since boot.`n"
 
 $results = foreach ($e in $events) {
     $flags = @()
