@@ -3,14 +3,7 @@ Write-Host "`n=== DFIR: Suspicious Network Activity Since Last Boot (CSV) ===`n"
 $boot = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
 Write-Host "Last Boot Time:" $boot "`n"
 
-$knownBenign = @(
-    "mspaint.exe","notepad.exe","calc.exe","explorer.exe",
-    "winword.exe","excel.exe","powerpnt.exe","chrome.exe",
-    "firefox.exe","Spotify.exe"
-)
-
 $alwaysLog = @("calc.exe","mspaint.exe","vscode.exe","node.exe")
-$suspiciousFolders = @("AppData","Temp","Downloads","Public","Recycle.Bin")
 $csvFolder = "$env:USERPROFILE\Desktop\SRUM_Network.csv"
 
 if (-not (Test-Path $csvFolder)) {
@@ -35,15 +28,14 @@ foreach ($row in $rawEvents) {
         $ts = [datetime]::Parse($row.Timestamp)
         if ($ts -lt $boot) { continue }
 
-        $bytesIn = [int64]$row.'Bytes Received'
-        $bytesOut = [int64]$row.'Bytes Sent'
         $image = $row.'Exe Info'
+        if (-not $image -and -not ($alwaysLog -contains $image)) { continue }
 
         $events += [pscustomobject]@{
             TimeCreated = $ts
             Image       = $image
-            BytesOut    = $bytesOut
-            BytesIn     = $bytesIn
+            BytesOut    = [int64]$row.'Bytes Sent'
+            BytesIn     = [int64]$row.'Bytes Received'
             Destination = "SRUM NetworkUsage Entry"
         }
     } catch {}
@@ -52,38 +44,16 @@ foreach ($row in $rawEvents) {
 Write-Host "[+] Loaded" $events.Count "NetworkUsage records since boot.`n"
 
 $results = foreach ($e in $events) {
-    $flags = @()
     $procName = if ($e.Image) { $e.Image } else { "Unknown" }
-
-    if (-not $e.Image) { $flags += "No Process Path / Unknown Executable" }
-    else {
-        foreach ($f in $suspiciousFolders) {
-            if ($e.Image -like "*$f*") { $flags += "Suspicious Directory ($f)" }
-        }
-
-        try {
-            $path = Get-Command $e.Image -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source
-            if ($path -and (Test-Path $path)) {
-                $sig = Get-AuthenticodeSignature $path -ErrorAction SilentlyContinue
-                if ($sig.Status -ne "Valid") { $flags += "Unsigned Executable" }
-                $file = Get-Item $path
-                if ($file.CreationTime -gt $boot) { $flags += "New File Since Boot" }
-            }
-        } catch {}
-    }
-
-    if ($alwaysLog -contains $procName) { $flags += "Always Logged Process" }
     if ($procName -ieq "svchost.exe") { continue }
 
-    if ($flags.Count -gt 0) {
-        [pscustomobject]@{
-            Time        = $e.TimeCreated
-            Process     = if ($e.Image) { $e.Image } else { "Unknown" }
-            Destination = $e.Destination
-            BytesOut    = $e.BytesOut
-            BytesIn     = $e.BytesIn
-            Flags       = $flags -join ", "
-        }
+    [pscustomobject]@{
+        Time        = $e.TimeCreated
+        Process     = $procName
+        Destination = $e.Destination
+        BytesOut    = $e.BytesOut
+        BytesIn     = $e.BytesIn
+        Flags       = if ($alwaysLog -contains $procName) { "Always Logged Process" } else { "" }
     }
 }
 
