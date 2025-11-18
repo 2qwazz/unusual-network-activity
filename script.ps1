@@ -3,24 +3,17 @@ Write-Host "`n=== DFIR: Suspicious Network Activity Since Last Boot (CSV) ===`n"
 $boot = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
 Write-Host "Last Boot Time:" $boot "`n"
 
-$knownBenign = @(
-    "mspaint.exe","notepad.exe","calc.exe","explorer.exe",
-    "winword.exe","excel.exe","powerpnt.exe","chrome.exe",
-    "firefox.exe","Spotify.exe"
-)
-
-$alwaysLog = @("calc.exe","mspaint.exe","vscode.exe","node.exe")
-$suspiciousFolders = @("AppData","Temp","Downloads","Public","Recycle.Bin")
-$csvFolder = "$env:USERPROFILE\Desktop\SRUM_Network" 
+$csvFolder = "$env:USERPROFILE\Desktop\SRUM_Network.csv"
 
 if (-not (Test-Path $csvFolder)) {
-    Write-Host "Folder 'SRUM_Network' not found on Desktop." -ForegroundColor Red
+    Write-Host "Folder 'SRUM_Network.csv' not found on Desktop." -ForegroundColor Red
     return
 }
 
 $csvFiles = Get-ChildItem -Path $csvFolder -Filter *.csv
+
 if ($csvFiles.Count -eq 0) {
-    Write-Host "No CSV files found in folder 'SRUM_Network'." -ForegroundColor Red
+    Write-Host "No CSV files found in folder 'SRUM_Network.csv'." -ForegroundColor Red
     return
 }
 
@@ -29,37 +22,17 @@ Write-Host "[+] Using CSV file:" $csvPath "`n"
 
 $rawEvents = Import-Csv $csvPath
 
-if ($rawEvents.Count -eq 0) {
-    Write-Host "CSV is empty." -ForegroundColor Yellow
-    return
-}
-
-# Dynamically detect column names
-$timeCol = ($rawEvents | Get-Member -MemberType NoteProperty | Where-Object {$_.Name -match "time"}).Name
-$bytesInCol = ($rawEvents | Get-Member -MemberType NoteProperty | Where-Object {$_.Name -match "recv|bytesin"}).Name
-$bytesOutCol = ($rawEvents | Get-Member -MemberType NoteProperty | Where-Object {$_.Name -match "sent|bytesout"}).Name
-$imageCol = ($rawEvents | Get-Member -MemberType NoteProperty | Where-Object {$_.Name -match "exe|path|app"}).Name
-
 $events = @()
 foreach ($row in $rawEvents) {
     try {
-        $ts = [datetime]::Parse($row.$timeCol)
+        $ts = [datetime]::Parse($row.TimeCreated)
         if ($ts -lt $boot) { continue }
-
-        $image = if ($row.$imageCol) { $row.$imageCol } else { $null }
-        if (-not $image) { continue } # skip rows with no executable path
-
-        $procName = Split-Path $image -Leaf
-        if ($procName -ieq "svchost.exe") { continue } # skip svchost
-
-        $bytesIn = if ($row.$bytesInCol) { [int64]$row.$bytesInCol } else { 0 }
-        $bytesOut = if ($row.$bytesOutCol) { [int64]$row.$bytesOutCol } else { 0 }
 
         $events += [pscustomobject]@{
             TimeCreated = $ts
-            Image       = $image
-            BytesOut    = $bytesOut
-            BytesIn     = $bytesIn
+            Image       = if ($row.ExecutablePath) { $row.ExecutablePath } else { $null }
+            BytesOut    = if ($row.BytesOut) { [int64]$row.BytesOut } else { 0 }
+            BytesIn     = if ($row.BytesIn) { [int64]$row.BytesIn } else { 0 }
             Destination = "SRUM NetworkUsage Entry"
         }
     } catch {}
@@ -67,41 +40,8 @@ foreach ($row in $rawEvents) {
 
 Write-Host "[+] Loaded" $events.Count "NetworkUsage records since boot.`n"
 
-$results = foreach ($e in $events) {
-    $flags = @()
-    $procName = Split-Path $e.Image -Leaf
-
-    if (-not (Test-Path $e.Image)) { $flags += "No Process Path / Unknown Executable" }
-    else {
-        try {
-            $sig = Get-AuthenticodeSignature $e.Image -ErrorAction Stop
-            if ($sig.Status -ne "Valid") { $flags += "Unsigned Executable" }
-        } catch {}
-    }
-
-    foreach ($f in $suspiciousFolders) {
-        if ($e.Image -like "*$f*") { $flags += "Suspicious Directory ($f)" }
-    }
-
-    try {
-        $file = Get-Item $e.Image -ErrorAction Stop
-        if ($file.CreationTime -gt $boot) { $flags += "New File Since Boot" }
-    } catch {}
-
-    if ($flags.Count -gt 0 -or $alwaysLog -contains $procName) {
-        [pscustomobject]@{
-            Time        = $e.TimeCreated
-            Process     = if ($e.Image) { $e.Image } else { "Unknown" }
-            Destination = $e.Destination
-            BytesOut    = $e.BytesOut
-            BytesIn     = $e.BytesIn
-            Flags       = $flags -join ", "
-        }
-    }
-}
-
-Write-Host "`n=== Suspicious Findings (CSV) ===`n"
-$results | Format-Table -AutoSize
-$results | Export-Csv "$env:USERPROFILE\Desktop\Suspicious_Network_Activity_CSV.csv" -NoTypeInformation
+Write-Host "`n=== Network Usage Events ===`n"
+$events | Format-Table -AutoSize
+$events | Export-Csv "$env:USERPROFILE\Desktop\Suspicious_Network_Activity_CSV.csv" -NoTypeInformation
 Write-Host "`nReport saved to Desktop as 'Suspicious_Network_Activity_CSV.csv'"
 Write-Host "Done.`n"
